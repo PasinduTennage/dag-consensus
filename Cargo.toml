@@ -1,0 +1,8 @@
+[package]
+name = "dag-consensus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1.0"              # Uses the latest compatible 1.x.x version
+tokio = { version = "1.0", features = ["full"] }  # With specific features

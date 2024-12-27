@@ -1,6 +1,8 @@
+use serde_json::error::Category::Data;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde_json::json;
+use utils::ClientRequest;
 
 #[tokio::main]
 async fn main() -> Result <(), Box<dyn std::error::Error>>{
@@ -9,7 +11,11 @@ async fn main() -> Result <(), Box<dyn std::error::Error>>{
         let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
 
         println!("connected to server");
-        let message = json!(["hello", "from", "the", "other", "side"]);
+        let message = ClientRequest{
+            id: format!("message-{}", i),
+            payload: vec![1,2,3,4],
+            sender: i,
+        };
 
         let serialized_message = serde_json::to_vec(&message)?;
 

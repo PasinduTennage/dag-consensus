@@ -1,17 +1,6 @@
-[package]
-name = "dag-consensus"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-serde = "1.0"              # Uses the latest compatible 1.x.x version
-serde_json = "1.0"
-tokio = { version = "1.0", features = ["full"] }  # With specific features
-
-[[bin]]
-name = "server"
-path = "src/main.rs"
-
-[[bin]]
-name = "client"
-path = "src/client.rs"
+[workspace]
+members = [
+    "server",
+    "client",
+    "utils"
+]

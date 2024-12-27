@@ -1,3 +1,5 @@
+mod client;
+
 use serde_json::error::Category::Data;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

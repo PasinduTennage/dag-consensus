@@ -23,6 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 Message::ReplicaMessage(replica_message) => {
                                     println!("received ReplicaMessage: {:?}", replica_message);
                                 }
+                                _ => {}
                             }
                             if let Err(e) = socket.write_all(&buffer[..size]).await {
                                 eprintln!("failed to send response {}", e);

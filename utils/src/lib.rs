@@ -5,17 +5,17 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClientRequestBatch {
-    pub id: String,
-    pub payload: Vec<Vec<u8>>,
     pub sender: i32,
+    pub id: String,
+    pub payload: Vec<Vec<u8>>, // a batch of requests
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ControlMessage {
-    pub operation: i32,
+    pub sender: i32,
+    pub operation_type: i32,
     pub str_params :Vec<String>,
     pub int_params :Vec<i32>,
-    pub sender: i32,
 }
 
 

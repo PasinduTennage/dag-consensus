@@ -19,10 +19,10 @@ pub struct Network {
 
     pub outgoing_connections: HashMap<i32, Arc<Mutex<TcpStream>>>, // for each remote peer the outgoing tcp channel
 
-    pub incoming_channel_sender: Arc<mpsc::Sender<Message>>, // listening sockets will put messages to incoming chan using this
-    pub incoming_channel_receiver: Arc<mpsc::Receiver<Message>>, // main thread will poll messages from incoming channel using this
+    pub incoming_channel_sender: Arc<mpsc::Sender<Message>>, // listening sockets will put messages to incoming chan using this object
+    pub incoming_channel_receiver: Arc<mpsc::Receiver<Message>>, // network main thread will poll messages from incoming channel using this object
 
-    pub external_outgoing_channel_sender: Arc<mpsc::Sender<Message>>, // all messages from the incoming channel will be put to this, and will be consumed by a different thread
+    pub external_outgoing_channel_sender: Arc<mpsc::Sender<Message>>, // all messages from the incoming channel will be sent to external channel using this object, and will be consumed by a different thread
 }
 impl Network {
     pub fn new(
@@ -43,6 +43,7 @@ impl Network {
         }
     }
 
+    // add a new outgoing tcp connection
     pub fn add_outgoing_connection(&mut self, id: i32, stream: TcpStream) {
         if self.outgoing_connections.contains_key(&id) {
             self.outgoing_connections.remove(&id);
@@ -53,22 +54,6 @@ impl Network {
 
     pub fn remove_outgoing_connection(&mut self, id: i32) {
         self.outgoing_connections.remove(&id);
-    }
-
-    pub fn get_peer_name(&mut self, add: SocketAddr) -> i32 {
-        let str_address = add.ip().to_string() + ":" + &add.port().to_string();
-        let result = self.remote_addrs.iter().find_map(|(id, addr)| {
-            if addr == &str_address {
-                Some(*id)
-            } else {
-                None
-            }
-        });
-
-        match result {
-            Some(id) => id,
-            None => panic!("No such address: {}", str_address),
-        }
     }
 
     pub fn handle_incoming_messages(&mut self) {
@@ -96,8 +81,8 @@ impl Network {
                             match listener.accept().await {
                                 Ok((mut socket, addr)) => {
                                     println!("Accepted connection from {:?}", addr);
-                                    let sender = Arc::clone(&sender);
-                                    self.listen_connection(sender, socket, addr);
+                                    let local_sender = Arc::clone(&sender);
+                                    self.listen_connection(local_sender, socket, addr);
                                 }
                                 Err(e) => {
                                     panic!("Failed to accept connection: {}", e);
@@ -105,21 +90,20 @@ impl Network {
                             }
                         }
                     }
-                    Err(e) => eprintln!("Failed to bind to {}: {}", listen_addr, e),
+                    Err(e) => panic!("Failed to bind to {}: {}", listen_addr, e),
                 }
             });
         });
     }
 
-    fn listen_connection(
+    pub fn listen_connection(
         &mut self,
         sender: Arc<Sender<Message>>,
         mut socket: TcpStream,
         addr: SocketAddr,
     ) {
-        let remote_id = self.get_peer_name(addr);
         thread::spawn(async move || {
-            println!("new connection from {:?}", remote_id);
+            println!("new connection from {:?}", addr);
             let mut buffer = vec![0; 1024 * 1024 * 10]; // max 10 MB messages
             loop {
                 if let Ok(size) = socket.read(&mut buffer).await {
@@ -130,7 +114,11 @@ impl Network {
                                 info!("sent message to network internal chan {?}", message)
                             }
                             Err(e) => {
-                                eprintln!("failed to deserialize {}", e);
+                                eprintln!("failed to deserialize message from {}", addr);
+                                if let Ok(..) = socket.shutdown().await.unwrap() {
+                                    eprintln!("closed incoming connection from {}", addr);
+                                }
+                                break;
                             }
                         }
                     }
@@ -145,8 +133,7 @@ impl Network {
                 match TcpStream::connect(addr).await {
                     Ok(stream) => {
                         println!("Successfully connected to remote peer {} at {}", id, addr);
-                        self.outgoing_connections
-                            .insert(*id, Arc::new(Mutex::new(stream)));
+                        self.add_outgoing_connection(*id, stream);
                         break;
                     }
                     Err(e) => {
@@ -165,18 +152,13 @@ impl Network {
 
         let addr = self.remote_addrs.get(&id).unwrap();
 
-        loop {
-            match TcpStream::connect(addr).await {
-                Ok(stream) => {
-                    println!("Successfully connected to remote peer {} at {}", id, addr);
-                    self.outgoing_connections
-                        .insert(*id, Arc::new(Mutex::new(stream)));
-                    break;
-                }
-                Err(e) => {
-                    eprintln!("Failed to connect to peer {} at {}: {}", id, addr, e);
-                    sleep(Duration::from_secs(1)).await;
-                }
+        match TcpStream::connect(addr).await {
+            Ok(stream) => {
+                println!("Successfully connected to remote peer {} at {}", id, addr);
+                self.add_outgoing_connection(id, stream);
+            }
+            Err(e) => {
+                eprintln!("Failed to connect to peer {} at {}: {}", id, addr, e);
             }
         }
     }
@@ -187,6 +169,17 @@ impl Network {
         }
         let stream = self.outgoing_connections.get(&id).unwrap();
         let serialized_message = serde_json::to_vec(&message)?;
-        stream.write_all(&serialized_message).await?;
+        match stream.write_all(&serialized_message).await {
+            Ok(_) => {
+                println!("Sent message to network outgoing connection {}", id);
+            }
+            Err(e) => {
+                eprintln!(
+                    "Failed to send message to network outgoing connection {}: {}",
+                    id, e
+                );
+                self.initiate_connection(id).await;
+            }
+        }
     }
 }

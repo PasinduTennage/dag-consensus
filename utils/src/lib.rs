@@ -1,4 +1,5 @@
 mod network;
+mod config;
 
 use serde::{Serialize, Deserialize};
 

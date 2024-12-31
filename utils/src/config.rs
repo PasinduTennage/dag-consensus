@@ -1,8 +1,8 @@
 use serde::de::Error;
 use serde::Deserialize;
-use serde_json::Value::String;
 use std::collections::HashMap;
 use std::fs;
+use std::string::String;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
@@ -42,37 +42,45 @@ pub struct Config {
 
 impl Config {
     pub fn new(id: i32, node_type: String, net_config: NetworkConfig) -> Config {
-        let mut listen_add = "";
-        let mut remotes: HashMap<i32, String> = HashMap::new();
+        let mut listen = "";
+        let mut remotes_map: HashMap<i32, String> = HashMap::new();
 
         if node_type == "peer" {
             for i in 0..net_config.peers.len() {
                 if net_config.peers[i].name == id {
-                    listen_add = &net_config.peers[i].address;
+                    listen = &net_config.peers[i].address;
                 }
-                remotes.insert(net_config.peers[i].name, net_config.peers[i].address);
+                remotes_map.insert(net_config.peers[i].name, net_config.peers[i].address);
             }
 
             for i in 0..net_config.clients.len() {
-                remotes.insert(net_config.clients[i].name, net_config.clients[i].address);
+                remotes_map.insert(net_config.clients[i].name, net_config.clients[i].address);
             }
         } else if node_type == "client" {
             for i in 0..net_config.peers.len() {
-                remotes.insert(net_config.peers[i].name, net_config.peers[i].address);
+                remotes_map.insert(net_config.peers[i].name, net_config.peers[i].address);
             }
 
             for i in 0..net_config.clients.len() {
                 if net_config.clients[i].name == id {
-                    listen_add = &net_config.clients[i].address;
+                    listen = &net_config.clients[i].address;
                 }
             }
+        }
+
+        if remotes_map.len() == 0 {
+            panic!("No network config found");
+        }
+
+        if listen == "" {
+            panic!("No listen address found");
         }
 
         Self {
             id: id,
             node_type,
-            listen_addr,
-            remotes,
+            listen_addr: listen.parse().unwrap(),
+            remotes: remotes_map,
         }
     }
 }

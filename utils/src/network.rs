@@ -111,7 +111,7 @@ impl Network {
                         match serde_json::from_slice::<Message>(&buffer[..size]) {
                             Ok(message) => {
                                 sender.send(message).await.unwrap();
-                                info!("sent message to network internal chan {?}", message)
+                                info!("sent message to network internal chan {}", message)
                             }
                             Err(e) => {
                                 eprintln!("failed to deserialize message from {}", addr);

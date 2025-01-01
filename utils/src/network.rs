@@ -68,7 +68,6 @@ impl Network {
 
     pub fn start_listening(&mut self) {
         let listen_addr = self.listen_addr.clone();
-        let sender = Arc::clone(&self.incoming_channel_sender); // Clone the Arc
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -81,8 +80,7 @@ impl Network {
                             match listener.accept().await {
                                 Ok((mut socket, addr)) => {
                                     println!("Accepted connection from {:?}", addr);
-                                    let local_sender = Arc::clone(&sender);
-                                    self.listen_connection(local_sender, socket, addr);
+                                    self.listen_connection(socket, addr);
                                 }
                                 Err(e) => {
                                     panic!("Failed to accept connection: {}", e);
@@ -96,31 +94,44 @@ impl Network {
         });
     }
 
-    pub fn listen_connection(
-        &mut self,
-        sender: Arc<Sender<Message>>,
-        mut socket: TcpStream,
-        addr: SocketAddr,
-    ) {
-        thread::spawn(async move || {
-            println!("new connection from {:?}", addr);
-            let mut buffer = vec![0; 1024 * 1024 * 10]; // max 10 MB messages
-            loop {
-                if let Ok(size) = socket.read(&mut buffer).await {
-                    if size > 0 {
-                        match serde_json::from_slice::<Message>(&buffer[..size]) {
-                            Ok(message) => {
-                                sender.send(message).await.unwrap();
-                                info!("sent message to network internal chan {}", message)
-                            }
-                            Err(e) => {
-                                eprintln!("failed to deserialize message from {}", addr);
-                                if let Ok(..) = socket.shutdown().await.unwrap() {
-                                    eprintln!("closed incoming connection from {}", addr);
+    pub fn listen_connection(&mut self, mut socket: TcpStream, addr: SocketAddr) {
+        let sender = Arc::clone(&self.incoming_channel_sender);
+        thread::spawn({
+            let sender = sender.clone();
+            async move {
+                println!("new connection from {}", addr);
+                let mut buffer = vec![0; 1024 * 1024 * 10]; // max 10 MB messages
+                loop {
+                    match socket.read(&mut buffer).await {
+                        Ok(size) if size > 0 => {
+                            match serde_json::from_slice::<Message>(&buffer[..size]) {
+                                Ok(message) => {
+                                    if let Err(e) = sender.send(message).await {
+                                        eprintln!("failed to send message to channel: {}", e);
+                                    } else {
+                                        info!("sent message to network internal chan");
+                                    }
                                 }
-                                break;
+                                Err(e) => {
+                                    eprintln!(
+                                        "failed to deserialize message from {}: {:?}",
+                                        addr, e
+                                    );
+                                    if socket.shutdown().await.is_ok() {
+                                        eprintln!("closed incoming connection from {}", addr);
+                                    }
+                                    break;
+                                }
                             }
                         }
+                        Err(e) => {
+                            eprintln!("failed to read from socket {}: {:?}", addr, e);
+                            if socket.shutdown().await.is_ok() {
+                                eprintln!("closed incoming connection from {}", addr);
+                            }
+                            break;
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -128,7 +139,8 @@ impl Network {
     }
 
     pub async fn initiate_all_connections(&mut self) {
-        for (id, addr) in &self.remote_addrs {
+        let remote_addrs = self.remote_addrs.clone();
+        for (id, addr) in &remote_addrs {
             loop {
                 match TcpStream::connect(addr).await {
                     Ok(stream) => {
@@ -167,8 +179,26 @@ impl Network {
         if !self.outgoing_connections.contains_key(&id) {
             panic!("No such outgoing connection: {}", id);
         }
-        let stream = self.outgoing_connections.get(&id).unwrap();
-        let serialized_message = serde_json::to_vec(&message)?;
+
+        // Get the stream and lock it asynchronously
+        let stream = match self.outgoing_connections.get(&id) {
+            Some(s) => s.clone(),
+            None => {
+                panic!("should not happen")
+            }
+        };
+        let mut stream = stream.lock().await;
+
+        // Serialize the message and handle serialization errors
+        let serialized_message = match serde_json::to_vec(&message) {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("Failed to serialize message for connection {}: {}", id, e);
+                panic!("Failed to serialize message for connection {}: {}", id, e);
+            }
+        };
+
+        // Write the serialized message to the stream
         match stream.write_all(&serialized_message).await {
             Ok(_) => {
                 println!("Sent message to network outgoing connection {}", id);
@@ -178,7 +208,7 @@ impl Network {
                     "Failed to send message to network outgoing connection {}: {}",
                     id, e
                 );
-                self.initiate_connection(id).await;
+                self.initiate_connection(id); // Attempt to reconnect on failure
             }
         }
     }

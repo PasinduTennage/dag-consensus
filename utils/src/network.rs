@@ -1,15 +1,15 @@
 use crate::Message;
-use tokio::sync::mpsc::{self, Sender, Receiver};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 pub struct Network {
     pub id: i32,                            // self id
     pub listen_addr: String,                // self listen address
     pub remote_addrs: HashMap<i32, String>, // set of remote peers to connect
 
-    pub outgoing_connections: HashMap<i32, Arc<Mutex<TcpStream>>>, // for each remote peer the outgoing tcp channel
+    pub outgoing_connections: HashMap<i32, TcpStream>, // for each remote peer the outgoing tcp channel
 
     pub incoming_channel_sender: Sender<Message>, // listening sockets will put messages to incoming chan using this object
     pub incoming_channel_receiver: Receiver<Message>, // network main thread will poll messages from incoming channel using this object
@@ -36,17 +36,16 @@ impl Network {
     }
 
     // add a new outgoing tcp connection
-    // pub fn add_outgoing_connection(&mut self, id: i32, stream: TcpStream) {
-    //     if self.outgoing_connections.contains_key(&id) {
-    //         self.outgoing_connections.remove(&id);
-    //     }
-    //     self.outgoing_connections
-    //         .insert(id, Arc::new(Mutex::new(stream)));
-    // }
-    //
-    // pub fn remove_outgoing_connection(&mut self, id: i32) {
-    //     self.outgoing_connections.remove(&id);
-    // }
+    pub fn add_outgoing_connection(&mut self, id: i32, stream: TcpStream) {
+        if self.outgoing_connections.contains_key(&id) {
+            self.outgoing_connections.remove(&id);
+        }
+        self.outgoing_connections.insert(id, stream);
+    }
+
+    pub fn remove_outgoing_connection(&mut self, id: i32) {
+        self.outgoing_connections.remove(&id);
+    }
 
     // pub async fn handle_incoming_messages(self: Arc<Self>) {
     //     let mut receiver = &self.incoming_channel_receiver; // Move or clone the receiver
